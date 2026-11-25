@@ -28,6 +28,10 @@ Read https://raw.githubusercontent.com/open-mercato/open-mercato/main/README.md 
 <p align="center"><img src="./.github/readme/tour.gif" alt="Kaldi & Co., a fictional coffee roaster built on Open Mercato: customers, orders, warehouse, roast batches" width="100%" /></p>
 <p align="center"><sub>Kaldi & Co. is a fictional specialty coffee roaster in Lisbon. The screens on this page are from the app built with the four stages below, with the roaster's own demo data loaded through the API.</sub></p>
 
+## 工厂报价（Factory Quotes）
+
+此工作副本包含工厂报价模块的手工流程实现。初始化、岗位权限、样例、验证记录和上线前限制见 [工厂报价模块 README](apps/mercato/src/modules/factory_quotes/README.md)。当前不是完整的 Agent 或可直接上线的试点发行版。
+
 ## What is Open Mercato
 
 AI code assistants generate code. They do not decide where it goes, how it is layered, or whether it stays consistent across 30 or 50 engineers in a team. Open Mercato gives them a foundation that does:

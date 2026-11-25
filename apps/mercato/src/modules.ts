@@ -183,6 +183,7 @@ export const enabledModules: ModuleEntry[] = [
   // Listed after customer_accounts/portal because its portal pages and public
   // runner resolve customer auth through them.
   { id: 'forms', from: '@open-mercato/core' },
+  { id: 'factory_quotes', from: '@app' },
   {
     id: 'example',
     from: '@app',

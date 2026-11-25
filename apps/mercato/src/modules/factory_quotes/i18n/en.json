@@ -1,0 +1,10 @@
+{
+  "factory_quotes.title": "Factory quotes",
+  "factory_quotes.intro": "Internal workspace · Manual mode · Structured records are the source of truth",
+  "factory_quotes.select": "Quotes and templates",
+  "factory_quotes.refresh": "Reload record",
+  "factory_quotes.error.stale_revision": "This record was changed. Reload it before retrying.",
+  "factory_quotes.error.org_required": "Select an authorized organization.",
+  "factory_quotes.error.invalid_input": "Check required fields and value formats.",
+  "factory_quotes.error.self_approval": "Submitters cannot approve their own quotes."
+}
