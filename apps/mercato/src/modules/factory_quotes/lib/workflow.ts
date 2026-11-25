@@ -79,6 +79,20 @@ export function apply(state: TemplateState | QuoteState, action: Action, actor: 
   }
   switch (action.type) {
     case 'message': return state
+    case 'csv_preview':
+      deny(state.stage === 'draft' && action.templateId === state.templateId, 'draft_required', 409)
+      return state
+    case 'csv_import': {
+      deny(state.stage === 'draft' && action.templateId === state.templateId, 'draft_required', 409)
+      const added = checkDraft(state.template, { ...state.draft, items: action.items }, undefined, canCost).items
+      // Replace only the module's untouched seed row, not user-entered lines.
+      const [first] = state.draft.items
+      const blank = state.draft.items.length === 1 && first.name === '01' && first.quantity === '1' && first.price === '0'
+        && Object.keys(first.fields).length === 0 && !state.rates.length && !Object.values(state.confirmations).some(Boolean)
+      const items = [...(blank ? [] : state.draft.items), ...added]
+      deny(items.length <= 50, 'csv_quote_limit')
+      return { ...state, draft: { ...state.draft, items }, rates: [], confirmations: {}, submission: undefined }
+    }
     case 'edit_quote': {
       deny(state.stage !== 'published', 'immutable_quote', 409)
       const draft = checkDraft(state.template, action.draft, state.draft, canCost)

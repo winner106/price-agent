@@ -10,8 +10,9 @@ import { bridgeLegacyGuard, runMutationGuards } from '@open-mercato/shared/lib/c
 import { getAllMutationGuardInstances } from '@open-mercato/shared/lib/crud/mutation-guard-store'
 import { getTelemetryRuntime } from '@open-mercato/shared/lib/telemetry/runtime'
 import { QuoteEvent, QuoteRecord } from '../../data/entities'
-import { mutationSchema, type Mutation } from '../../data/validators'
+import { csvPacket, mutationSchema, type Mutation } from '../../data/validators'
 import { commandId } from '../../commands/workspace'
+import { CsvFault, csvSuggestions, csvTargets, mapRows, parseCsv, readCsv } from '../../lib/csv'
 import { resolveAccess } from '../../lib/access'
 import { deny, project, QuoteFault } from '../../lib/workflow'
 
@@ -29,6 +30,7 @@ async function context(request: Request): Promise<CommandRuntimeContext> {
     organizationIds: scope?.filterIds ?? (auth.orgId ? [auth.orgId] : []), request }
 }
 function onError(error: unknown) {
+  if (error instanceof CsvFault) return json({ error: error.code, position: error.position }, error.status)
   if (error instanceof QuoteFault) return json({ error: error.code }, error.status)
   if (error instanceof z.ZodError) return json({ error: 'invalid_input', fields: error.issues.map((i) => i.path.join('.')) }, 400)
   const rejection = getCommandInterceptorHttpRejection(error)
@@ -86,16 +88,51 @@ async function body(request: Request): Promise<unknown> {
     throw new QuoteFault(400, 'invalid_input')
   } finally { source.releaseLock() }
 }
+async function prepareCsv(request: Request, em: EntityManager, access: Awaited<ReturnType<typeof resolveAccess>>) {
+  deny(access.have.has('edit'), 'forbidden', 403)
+  const header = request.headers.get('x-factory-csv')
+  deny(header && header.length <= 8192, 'invalid_input', 400)
+  let decoded: unknown
+  try { decoded = JSON.parse(header) } catch { throw new QuoteFault(400, 'invalid_input') }
+  const { id, revision, token, headerRow, templateId, apply } = csvPacket.parse(decoded)
+  const row = await em.findOne(QuoteRecord, { id, kind: 'quote', ...access.scope })
+  deny(row?.state.type === 'quote', 'not_found', 404)
+  deny(row.state.templateId === templateId, 'stale_revision', 409)
+  if (!apply) deny(row.revision === revision && row.state.stage === 'draft', 'stale_revision', 409)
+  else {
+    const preview = await em.findOne(QuoteEvent, { id: apply.receipt, actorId: access.actor, recordId: id, action: 'csv_preview', ...access.scope })
+    deny(preview, 'csv_preview_mismatch', 409)
+  }
+  const { digest, text } = await readCsv(request)
+  const doc = parseCsv(text, headerRow)
+  if (apply) {
+    const mapped = mapRows(doc, row.state.template, access.have.has('cost'), apply.mapping, apply)
+    return { row, input: mutationSchema.parse({ id, revision, token, action: { type: 'csv_import', digest, headerRow, templateId, ...apply, ...mapped } }) }
+  }
+  const targets = csvTargets(row.state.template, access.have.has('cost'))
+  return {
+    row,
+    input: mutationSchema.parse({ id, revision, token, action: { type: 'csv_preview', digest, templateId, headerRow, headers: doc.header.cells, totalRows: doc.rows.length } }),
+    preview: { headers: doc.header.cells.map((cell) => cell.slice(0, 150)), totalRows: doc.rows.length, rows: doc.rows.slice(0, 5)
+      .map((r) => ({ row: r.row, cells: r.cells.map((cell) => cell.slice(0, 150)) })),
+      from: doc.rows[0].row, to: doc.rows[Math.min(49, doc.rows.length - 1)].row,
+      targets: targets.map(({ key, label, required }) => ({ key, label, required })), suggestions: csvSuggestions(doc.header.cells, targets) },
+  }
+}
 export async function POST(request: Request) {
   try {
     const ctx = await context(request)
-    const { actor, scope, grants } = await resolveAccess(ctx)
-    deny(request.headers.get('content-type')?.split(';')[0] === 'application/json' && request.headers.get('sec-fetch-site') !== 'cross-site', 'invalid_input', 400)
-    let input = mutationSchema.parse(await body(request))
-    const initial = input
+    const access = await resolveAccess(ctx)
+    const { actor, scope, grants } = access
+    const media = request.headers.get('content-type')?.split(';')[0]
+    deny((media === 'application/json' || media === 'text/csv') && request.headers.get('sec-fetch-site') !== 'cross-site', 'invalid_input', 400)
     const em = ctx.container.resolve<EntityManager>('em')
+    const csv = media === 'text/csv' ? await prepareCsv(request, em, access) : undefined
+    let input = csv?.input ?? mutationSchema.parse(await body(request))
+    deny(csv || !['csv_preview', 'csv_import'].includes(input.action.type), 'invalid_input', 400)
+    const initial = input
     const create = input.action.type === 'new_quote' || input.action.type === 'new_template'
-    const row = create ? null : await em.findOne(QuoteRecord, { id: input.id, ...scope })
+    const row = csv?.row ?? (create ? null : await em.findOne(QuoteRecord, { id: input.id, ...scope }))
     deny(create || row, 'not_found', 404)
     const guards = [...getAllMutationGuardInstances()]
     const legacy = bridgeLegacyGuard(ctx.container)
@@ -105,22 +142,28 @@ export async function POST(request: Request) {
     const decision = await runMutationGuards(guards, { ...guardContext, mutationPayload: input }, { userFeatures: grants })
     if (!decision.ok) return json(decision.errorBody ?? { error: 'guard_blocked' }, decision.errorStatus ?? 422)
     if (decision.modifiedPayload) {
+      // Import is bound to the exact validated server-derived payload, including
+      // provenance. Guards may stop it but must not substitute mapped data.
+      if (csv) {
+        const guarded = mutationSchema.parse({ ...input, ...decision.modifiedPayload })
+        deny(JSON.stringify(guarded) === JSON.stringify(initial), 'guard_scope_changed', 403)
+      }
       input = mutationSchema.parse({ ...input, ...decision.modifiedPayload })
       deny(initial.id === input.id && initial.revision === input.revision && initial.token === input.token && initial.action.type === input.action.type, 'guard_scope_changed', 403)
     }
     const bus = ctx.container.resolve<CommandBus>('commandBus')
-    const { result } = await bus.execute<Mutation, unknown>(commandId, { input, ctx })
+    const { result } = await bus.execute<Mutation, { id: string; revision: number; receipt?: string }>(commandId, { input, ctx })
     for (const next of decision.afterSuccessCallbacks) {
       try { await next.guard.afterSuccess?.({ ...guardContext, resourceId: input.id, metadata: next.metadata ?? null }) }
       catch { getTelemetryRuntime()?.reportError(new Error('Factory quote after-success hook failed'), { module: 'factory_quotes', code: 'after_success_failed' }) }
     }
-    return json(result)
+    return json(csv?.preview ? { ...result, preview: csv.preview } : result)
   } catch (error) { return onError(error) }
 }
 
 export const openApi: OpenApiRouteDoc = {
   tag: 'Factory Quotes', summary: 'Factory quoting workspace', methods: {
     GET: { summary: 'Read scoped workspace or record', query: z.object({ id: z.uuid().optional() }), responses: [{ status: 200, description: 'Scoped projection', schema: z.record(z.string(), z.unknown()) }] },
-    POST: { summary: 'Apply a revision-checked workspace action', requestBody: { contentType: 'application/json', schema: mutationSchema }, responses: [{ status: 200, description: 'Action result', schema: z.object({ id: z.uuid(), revision: z.number(), document: z.unknown().optional() }) }] },
+    POST: { summary: 'Apply a revision-checked workspace action', description: 'CSV upload accepts text/csv and the x-factory-csv JSON metadata header; use its preview receipt to confirm the same file and mapping.', requestBody: { contentType: 'application/json', schema: mutationSchema }, responses: [{ status: 200, description: 'Action result', schema: z.object({ id: z.uuid(), revision: z.number(), document: z.unknown().optional() }) }] },
   },
 }

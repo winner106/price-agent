@@ -36,7 +36,7 @@ export function validateTemplate(t: Template): string[] {
   return [...new Set(issues)]
 }
 
-function fieldValue(field: Template['fields'][number], value: string): boolean {
+export function fieldValue(field: Template['fields'][number], value: string): boolean {
   switch (field.type) {
     case 'integer': return /^(0|[1-9]\d{0,11})$/.test(value)
     case 'decimal': return decimalPattern.test(value)

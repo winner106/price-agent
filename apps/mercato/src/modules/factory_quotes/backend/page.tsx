@@ -10,6 +10,7 @@ import type { Access } from '../acl'
 import type { Draft, Mutation, Template } from '../data/validators'
 import type { project, TemplateState } from '../lib/workflow'
 import type { publicQuote, Rates } from '../lib/engine'
+import { CsvCard } from './csv-card.client'
 import { machining, sku } from '../lib/seeds'
 
 const path = '/api/factory-quotes'
@@ -140,7 +141,7 @@ export default function FactoryQuotePage() {
             })}</Panel>}
           </div>
           <div className={`${mobile === 'data' ? '' : 'hidden'} lg:block space-y-4`}>
-            <QuoteEditor key={`${detail.id}:${detail.revision}`} state={state} act={act} edit={has('edit')} cost={has('cost')} busy={busy} />
+            <QuoteEditor key={`${detail.id}:${detail.revision}`} state={state} act={act} edit={has('edit')} cost={has('cost')} busy={busy} identity={{ id: detail.id, revision: detail.revision }} onApplied={() => load(detail.id)} />
             {state.stage === 'published' && <Panel title="成交与复盘">
               <p>{state.outcome ?? '待登记'}</p>
               {has('edit') && <><TextAction label="发送来源或备注" button="登记人工发送" busy={busy} run={(source) => act({ type: 'sent', source })} />
@@ -179,13 +180,14 @@ function ActualForm({ busy, act }: { busy: boolean; act: Act }) {
   </form>
 }
 
-function QuoteEditor({ state, act, edit, cost, busy }: { state: ReturnType<typeof project>; act: Act; edit: boolean; cost: boolean; busy: boolean }) {
+function QuoteEditor({ state, act, edit, cost, busy, identity, onApplied }: { state: ReturnType<typeof project>; act: Act; edit: boolean; cost: boolean; busy: boolean; identity: { id: string; revision: number }; onApplied: () => Promise<void> }) {
   const [draft, set] = useState(state.draft)
   const [rates, setRates] = useState<Rates>(() => state.draft.items.map((_, i) => state.rates[i] ?? {}))
   const [changed, setChanged] = useState(false)
   const update = (next: Draft) => { set(next); setChanged(true) }
   const item = (i: number, next: Draft['items'][number]) => update({ ...draft, items: draft.items.map((v, index) => i === index ? next : v) })
   return <>
+    {edit && state.stage === 'draft' && <CsvCard {...identity} templateId={state.templateId} disabled={changed || busy} onApplied={onApplied} />}
     <Panel title="报价资料">
       <fieldset disabled={!edit || busy || state.stage === 'published'} className="space-y-3">
         <div className="grid gap-2 sm:grid-cols-2">{([

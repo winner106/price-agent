@@ -8,7 +8,7 @@ import { resolveAccess } from '../lib/access'
 import { actionAccess, apply, deny, QuoteFault, startQuote } from '../lib/workflow'
 
 export const commandId = 'factory_quotes.workspace.apply'
-const command: CommandHandler<Mutation, { id: string; revision: number; document?: unknown }> = {
+const command: CommandHandler<Mutation, { id: string; revision: number; document?: unknown; receipt?: string }> = {
   id: commandId,
   async execute(raw, ctx) {
     const input = mutationSchema.parse(raw)
@@ -27,8 +27,24 @@ const command: CommandHandler<Mutation, { id: string; revision: number; document
           const prior = await tx.findOne(QuoteEvent, { recordId: id, actorId: actor, token, ...scope })
           if (prior) {
             deny(prior.fingerprint === fingerprint, 'token_reuse', 409)
-            return { id, revision: prior.revision, ...(action.type === 'export' && row.state.type === 'quote' ? { document: row.state.release?.document } : {}) }
+            return { id, revision: prior.revision, ...(action.type === 'csv_preview' ? { receipt: prior.id } : {}), ...(action.type === 'export' && row.state.type === 'quote' ? { document: row.state.release?.document } : {}) }
           }
+        }
+        let eventId = randomUUID()
+        if (action.type === 'csv_import') {
+          deny(row?.state.type === 'quote', 'not_found', 404)
+          const preview = await tx.findOne(QuoteEvent, { id: action.receipt, recordId: id, actorId: actor, action: 'csv_preview', ...scope })
+          const staged = preview?.details.action as { digest?: string; headerRow?: number; templateId?: string } | undefined
+          deny(preview && staged?.digest === action.digest && staged.headerRow === action.headerRow && staged.templateId === action.templateId, 'csv_preview_mismatch', 409)
+          deny(preview.revision === revision, 'stale_revision', 409)
+          deny(preview.createdAt.getTime() > now.getTime() - 30 * 60 * 1000, 'csv_preview_expired', 409)
+          // Same file, selected range and mapping cannot append again through a
+          // new retry token; deterministic receipt lookup is inside the row lock.
+          const digest = createHash('sha256').update(JSON.stringify([scope.tenantId, scope.organizationId, id,
+            action.digest, action.headerRow, action.from, action.to, Object.entries(action.mapping).sort()])).digest('hex')
+          eventId = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`
+          const duplicate = await tx.findOne(QuoteEvent, { id: eventId, recordId: id, ...scope })
+          deny(!duplicate, 'csv_already_imported', 409)
         }
         if (creating) {
           deny(!row && revision === -1, 'stale_revision', 409)
@@ -47,15 +63,15 @@ const command: CommandHandler<Mutation, { id: string; revision: number; document
           row.state = apply(row.state, action, actor, now.toISOString(), have.has('cost'))
           row.title = row.state.type === 'template' ? row.state.spec.name : row.state.draft.customer
           // Chat and export audit events don't invalidate in-flight business edits.
-          if (!['message', 'export', 'sent'].includes(action.type)) { row.revision++; row.updatedAt = now }
+          if (!['message', 'export', 'sent', 'csv_preview'].includes(action.type)) { row.revision++; row.updatedAt = now }
         }
         const details: Record<string, unknown> = { action }
         if (row.state.type === 'quote' && action.type === 'submit') details.frozen = row.state.submission?.frozen
         tx.persist(row)
         if (creating) await tx.flush()
-        tx.persist(tx.create(QuoteEvent, { ...scope, id: randomUUID(), recordId: id, actorId: actor, token,
+        tx.persist(tx.create(QuoteEvent, { ...scope, id: eventId, recordId: id, actorId: actor, token,
           action: action.type, fingerprint, revision: row.revision, details, createdAt: now }))
-        return { id, revision: row.revision, ...(action.type === 'export' && row.state.type === 'quote' ? { document: row.state.release?.document } : {}) }
+        return { id, revision: row.revision, ...(action.type === 'csv_preview' ? { receipt: eventId } : {}), ...(action.type === 'export' && row.state.type === 'quote' ? { document: row.state.release?.document } : {}) }
       })
     } catch (error) {
       if (error instanceof UniqueConstraintViolationException) throw new QuoteFault(409, 'concurrent_submission')

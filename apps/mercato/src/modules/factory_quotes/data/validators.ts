@@ -36,6 +36,15 @@ export const draftSchema = z.object({
 const confirmation = z.object({ kind: z.enum(['technical', 'cost', 'delivery']), evidence: text, sourcePerson: text.optional() }).strict()
 const actual = z.object({ quantity: z.string().regex(/^[1-9]\d{0,8}$/), totalCost: decimal,
   materialUsage: text, prepHours: decimal, workHours: decimal, subcontract: decimal, source: text, comment: text }).strict()
+const csvHash = z.string().regex(/^[a-f0-9]{64}$/)
+export const csvPosition = z.number().int().min(1).max(10 * 1024 * 1024)
+const csvKey = z.string().regex(/^(name|quantity|price|field:[a-z][a-z0-9_]{0,47})$/)
+export const csvMapping = z.record(csvKey, z.number().int().min(1).max(100))
+export const csvPacket = z.object({
+  id: z.uuid(), token: z.uuid(), revision: z.number().int().min(0).max(1_000_000_000),
+  headerRow: csvPosition, templateId: z.uuid(),
+  apply: z.object({ receipt: z.uuid(), mapping: csvMapping, from: csvPosition, to: csvPosition }).strict().optional(),
+}).strict()
 export const mutationSchema = z.object({
   id: z.uuid(), token: z.uuid(), revision: z.number().int().min(-1).max(1_000_000_000),
   action: z.discriminatedUnion('type', [
@@ -56,6 +65,11 @@ export const mutationSchema = z.object({
     z.object({ type: z.literal('outcome'), result: z.enum(['won', 'lost', 'revision_requested']), source: text }).strict(),
     z.object({ type: z.literal('actual'), actual }).strict(),
     z.object({ type: z.literal('message'), text: z.string().trim().min(1).max(4000) }).strict(),
+    z.object({ type: z.literal('csv_preview'), digest: csvHash, templateId: z.uuid(), headerRow: csvPosition,
+      headers: z.array(z.string().max(4096)).min(1).max(100), totalRows: z.number().int().min(1).max(10_000) }).strict(),
+    z.object({ type: z.literal('csv_import'), digest: csvHash, templateId: z.uuid(), headerRow: csvPosition, receipt: z.uuid(),
+      mapping: csvMapping, from: csvPosition, to: csvPosition, items: z.array(itemSchema).min(1).max(50),
+      sourceRows: z.array(z.object({ row: csvPosition, original: z.record(csvKey, z.string().max(250)) }).strict()).min(1).max(50) }).strict(),
   ]),
 }).strict()
 export type Template = z.infer<typeof templateSchema>
