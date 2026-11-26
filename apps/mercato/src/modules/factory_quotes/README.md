@@ -40,6 +40,7 @@
 
 ## 验证结果及上线前缺口
 
-- Linux、Node 24.16.0 下使用 `yarn install --immutable --mode=skip-build` 完成锁定依赖链接。标准仓库命令 `yarn workspace @open-mercato/app test --runInBand src/modules/factory_quotes/__tests__` 的 3 个套件、15 个用例通过，含 CSV 解析、保护映射及模拟事务内重复导入、过期修订和跨组织拒绝。模拟事务不是 PostgreSQL 集成测试。`yarn build:packages` 在核心包因 esbuild 服务停止失败；完整注册表生成、应用构建、真实数据库迁移、浏览器及部署仍未验证。
+- Linux、Node 24.16.0 下使用 `yarn install --immutable --mode=skip-build` 完成锁定依赖链接。标准仓库命令 `yarn workspace @open-mercato/app test --runInBand src/modules/factory_quotes/__tests__` 的 3 个套件、15 个用例通过，含 CSV 解析、保护映射及模拟事务内重复导入、过期修订和跨组织拒绝。模拟事务不是 PostgreSQL 集成测试。`yarn build:packages` 在核心包因 esbuild 服务停止失败；完整注册表生成、应用构建、全应用迁移、浏览器及部署仍未验证。
+- PostgreSQL 17.12 隔离测试：设置 `FACTORY_QUOTES_TEST_DATABASE_URL` 为仅本地测试实例的连接串，再运行上面的 Jest 命令。测试只接受回环地址，创建随机独立 schema，经 MikroORM 执行本模块迁移，并在结束时删除该 schema。不设变量时跳过这一套件。已实测 **4 个套件、16 个用例通过**：通过报价 GET/POST 处理器和真实数据库执行模板发布、并发 CSV 重试（只保存一条导入事件）、岗位确认、独立审批、正式输出及成交复盘。已核对跨租户/组织读拒绝、只读员工不能发布、正式输出不含成本出处、复盘不改变正式快照。测试注入的是会话、权限数据和命令总线适配器，不覆盖完整的 Open Mercato 会话、部署或浏览器栈。
 - 无真实供应商验证、无真实试点样本；不能把领域测试当作准确率或拦截率实测。试点应记录：字段提取准确率＝经工程师核定正确候选值/抽检候选；计价一致性＝同口径双算完全一致单数/双算总单数；关键错误拦截率＝被阻塞的已标注关键错误/所有注入及实测关键错误；人工修改次数按业务动作审计逐单计数；耗时从询价接收到正式发布，单列外部等待。五项均未实测，没有达标声明。
 - 上线前必须补齐：双入口 AI SDK/useChat 与只写密钥；行业集合、方案与模板/品牌独立版本；受权附件和 XLSX 解析与导入；相似单与主数据契约、SKU 阶梯/协议价和冲突；细粒度单据权限、站内任务、去重通知及调度；跨租户/并发/端到端验证。当前手工策略使用通用例外标记，不能覆盖完整底价、付款和交付策略。不要将这份代码当作完整试点交付。
