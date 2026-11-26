@@ -112,5 +112,19 @@ withPg('factory quote HTTP handlers on PostgreSQL', () => {
     const reviewed = await ok(detail({ 'x-test-user': operator }))
     expect(reviewed.state.variance).toMatchObject({ quotedQuantity: '600', quotedUnitCost: '144.00', actualUnitCost: '150.00', unitDifference: '6.00' })
     expect((await ok(post(id, 10, { type: 'export' }, reader))).document).toEqual(formal.document)
+    const candidate = randomUUID()
+    await ok(post(candidate, -1, { type: 'new_quote', templateId, draft: { customer: '新询价',
+      items: [{ name: '样件', quantity: '500', price: '0', fields: { sku: '00017' } }],
+      destination: '', freight: '', payment: '', taxRate: '0', exceptional: false } }))
+    const similar = (headers: Record<string, string>) => GET(new Request(`${endpoint}?id=${candidate}&similar=1`, { headers }))
+    const matches = await ok(similar({ 'x-test-user': reader }))
+    expect(matches.items).toMatchObject([{ id, templateId, historicUnitPrice: '184',
+      matches: [{ key: 'sku', historical: '00017' }], differences: [{ key: '$quantity', current: '500', historical: '600' }] }])
+    expect(JSON.stringify(matches)).not.toContain('PRIVATE-SUPPLIER')
+    expect((await similar({ 'x-test-user': operator, 'x-test-org': randomUUID() })).status).toBe(404)
+    expect((await similar({ 'x-test-user': operator, 'x-test-tenant': randomUUID() })).status).toBe(404)
+    const unchanged = await ok(GET(new Request(`${endpoint}?id=${candidate}`, { headers: { 'x-test-user': operator } })))
+    expect(unchanged).toMatchObject({ revision: 0, state: { rates: [], draft: { items: [{ price: '0' }] } } })
+
   })
 })

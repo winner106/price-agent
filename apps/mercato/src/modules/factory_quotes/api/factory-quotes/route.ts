@@ -1,3 +1,4 @@
+import { raw } from '@mikro-orm/core'
 import { z } from 'zod'
 import type { EntityManager } from '@mikro-orm/postgresql'
 import type { OpenApiRouteDoc } from '@open-mercato/shared/lib/openapi'
@@ -13,6 +14,7 @@ import { QuoteEvent, QuoteRecord } from '../../data/entities'
 import { csvPacket, mutationSchema, type Mutation } from '../../data/validators'
 import { commandId } from '../../commands/workspace'
 import { CsvFault, csvSuggestions, csvTargets, mapRows, parseCsv, readCsv } from '../../lib/csv'
+import { compareHistory } from '../../lib/similarity'
 import { resolveAccess } from '../../lib/access'
 import { deny, project, QuoteFault } from '../../lib/workflow'
 
@@ -50,7 +52,10 @@ export async function GET(request: Request) {
     const { have, scope, actor } = await resolveAccess(ctx)
     const config = have.has('configure') || have.has('publish_template')
     const em = ctx.container.resolve<EntityManager>('em')
-    const id = new URL(request.url).searchParams.get('id')
+    const params = new URL(request.url).searchParams
+    const id = params.get('id')
+    const similar = params.get('similar')
+    if (similar !== null) deny(id && /^[1-9]\d?$/.test(similar), 'invalid_input', 400)
     if (!id) {
       const [quotes, templates] = await Promise.all([
         em.find(QuoteRecord, { ...scope, kind: 'quote' }, { orderBy: { updatedAt: 'desc' }, limit: 100 }),
@@ -61,6 +66,18 @@ export async function GET(request: Request) {
     }
     const row = await em.findOne(QuoteRecord, { id: z.uuid().parse(id), ...scope })
     deny(row, 'not_found', 404)
+    if (similar !== null) {
+      deny(row.state.type === 'quote', 'not_found', 404)
+      const current = row.state.draft.items[Number(similar) - 1]
+      deny(current, 'not_found', 404)
+      const cap = 150
+      const candidates = await em.find(QuoteRecord, { ...scope, kind: 'quote', id: { $ne: row.id },
+        [raw(`"state" ->> 'stage'`)]: 'published',
+      }, { orderBy: { updatedAt: 'desc', id: 'asc' }, limit: cap + 1 })
+      return json({ items: compareHistory(row.state, current, candidates.slice(0, cap).flatMap((candidate) =>
+        candidate.state.type === 'quote' ? [{ id: candidate.id, state: candidate.state }] : [])),
+      truncated: candidates.length > cap, scanned: Math.min(candidates.length, cap) })
+    }
     const day = new Date().toISOString().slice(0, 10)
     const state = row.state.type === 'template' ? templateProjection(row, config, have.has('cost'))
       : { type: 'quote', ...project(row.state, day, have.has('cost')) }
@@ -163,7 +180,7 @@ export async function POST(request: Request) {
 
 export const openApi: OpenApiRouteDoc = {
   tag: 'Factory Quotes', summary: 'Factory quoting workspace', methods: {
-    GET: { summary: 'Read scoped workspace or record', query: z.object({ id: z.uuid().optional() }), responses: [{ status: 200, description: 'Scoped projection', schema: z.record(z.string(), z.unknown()) }] },
+    GET: { summary: 'Read scoped workspace or record', query: z.object({ id: z.uuid().optional(), similar: z.string().regex(/^[1-9]\d?$/).optional() }), responses: [{ status: 200, description: 'Scoped projection', schema: z.record(z.string(), z.unknown()) }] },
     POST: { summary: 'Apply a revision-checked workspace action', description: 'CSV upload accepts text/csv and the x-factory-csv JSON metadata header; use its preview receipt to confirm the same file and mapping.', requestBody: { contentType: 'application/json', schema: mutationSchema }, responses: [{ status: 200, description: 'Action result', schema: z.object({ id: z.uuid(), revision: z.number(), document: z.unknown().optional() }) }] },
   },
 }

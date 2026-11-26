@@ -11,6 +11,7 @@ import type { Draft, Mutation, Template } from '../data/validators'
 import type { project, TemplateState } from '../lib/workflow'
 import type { publicQuote, Rates } from '../lib/engine'
 import { CsvCard } from './csv-card.client'
+import { SimilarCard } from './similar-card.client'
 import { machining, sku } from '../lib/seeds'
 
 const path = '/api/factory-quotes'
@@ -120,6 +121,7 @@ export default function FactoryQuotePage() {
                 <Input name="text" aria-label="询价笔记" placeholder="粘贴询价要点；不自动写入规格" maxLength={4000} required /><Button disabled={busy}>保存</Button>
               </form>}
             </Panel>
+            <SimilarCard key={`${detail.id}:${detail.revision}`} id={detail.id} items={state.draft.items} />
             <Panel title="发布资格">
               <p>{state.stage === 'published' ? '已正式发布' : `非正式报价 · ${state.calc.status}`}</p>
               {!!state.calc.missing.length && <ul className="list-inside list-disc text-sm">{state.calc.missing.map((x) => <li key={x}>{x}</li>)}</ul>}

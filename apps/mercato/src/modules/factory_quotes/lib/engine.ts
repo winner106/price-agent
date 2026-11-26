@@ -36,6 +36,13 @@ export function validateTemplate(t: Template): string[] {
   return [...new Set(issues)]
 }
 
+export function normalizedMeasure(value: string): { dimension: string; amount: bigint } | null {
+  const [amount, unit, extra] = value.trim().split(/\s+/)
+  if (extra || !decimalPattern.test(amount) || !Object.hasOwn(units, unit)) return null
+  const [dimension, factor] = units[unit]
+  return { dimension, amount: exact(amount) * factor }
+}
+
 export function fieldValue(field: Template['fields'][number], value: string): boolean {
   switch (field.type) {
     case 'integer': return /^(0|[1-9]\d{0,11})$/.test(value)
@@ -45,8 +52,8 @@ export function fieldValue(field: Template['fields'][number], value: string): bo
     case 'multi': { const entries = value.split(',').map((x) => x.trim()); return new Set(entries).size === entries.length && entries.every((x) => field.options.includes(x)) }
     case 'date': { const time = Date.parse(value); return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value }
     case 'measure': {
-      const [amount, unit, extra] = value.split(/\s+/)
-      return !extra && decimalPattern.test(amount) && !!field.unit && Object.hasOwn(units, unit) && units[unit][0] === units[field.unit][0]
+      const measure = normalizedMeasure(value)
+      return !!measure && !!field.unit && measure.dimension === units[field.unit][0]
     }
     default: return !!value.trim()
   }

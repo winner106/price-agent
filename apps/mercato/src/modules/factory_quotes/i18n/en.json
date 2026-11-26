@@ -25,5 +25,20 @@
   "factory_quotes.error.csv_invalid_field": "This cell is not valid for the selected field.",
   "factory_quotes.error.csv_quote_limit": "A quote can contain no more than 50 items.",
   "factory_quotes.error.csv_forbidden_mapping": "You cannot import into the selected field.",
-  "factory_quotes.error.csv_invalid_range": "Select a range starting and ending on data rows."
+  "factory_quotes.error.csv_invalid_range": "Select a range starting and ending on data rows.",
+  "factory_quotes.similar.title": "Similar historical quotes",
+  "factory_quotes.similar.reference": "Compares saved specifications only. Historical prices are a reference and will not be copied. Use current evidence to price this quote.",
+  "factory_quotes.similar.item": "Quote item",
+  "factory_quotes.similar.search": "Find similar quotes",
+  "factory_quotes.similar.loading": "Searching…",
+  "factory_quotes.similar.failed": "Could not load similar quotes. Please retry.",
+  "factory_quotes.similar.truncated": "Compared only the 150 most recently updated published quotes in this organization.",
+  "factory_quotes.similar.empty": "No sufficiently similar historical quote was found.",
+  "factory_quotes.similar.source": "Source: published quote",
+  "factory_quotes.similar.version": "Template version",
+  "factory_quotes.similar.price": "Reference net unit price",
+  "factory_quotes.similar.validity": "Originally valid through",
+  "factory_quotes.similar.matches": "Reasons for match",
+  "factory_quotes.similar.differences": "Differences (current / historical)",
+  "factory_quotes.similar.unknown": "(verify)"
 }
