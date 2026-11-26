@@ -1,7 +1,7 @@
 import * as esbuild from 'esbuild'
 import { glob } from 'glob'
 import { copyFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
-import { basename, dirname, join, relative } from 'node:path'
+import { basename, dirname, extname, join, relative } from 'node:path'
 import { createAtomicWritePlugin } from './lib/add-js-extension.mjs'
 
 // `*.typecheck.*` files exist only so `tsc --noEmit` can assert a type contract;
@@ -61,6 +61,7 @@ async function copyJsonFiles(packageDir, outdir, ignore) {
 //   clearDist            — wipe outdir before building (default: false)
 //   copyJson             — copy src/**/*.json to dist after build (default: false)
 //   copyJsonIgnore       — extra ignore patterns for JSON copy
+//   batchSize            — cap entry points per one-shot unbundled build; off by default
 //   watch                — use esbuild.context().watch() instead of one-shot build (default: false)
 //   beforeBuild({packageDir, outdir})         — optional async hook run before build
 //   afterBuild({packageDir, outdir, result})  — optional async hook run after successful build
@@ -84,9 +85,16 @@ export async function buildPackage(packageDir, userOptions = {}) {
     copyJson = false,
     copyJsonIgnore = [],
     watch = false,
+    batchSize,
     beforeBuild,
     afterBuild,
   } = userOptions
+
+  const batched = batchSize !== undefined
+  if (batched && (!Number.isSafeInteger(batchSize) || batchSize <= 0 || bundle || watch ||
+    extraPlugins.length || Object.keys(esbuildOverrides).length)) {
+    throw new Error(`[build:${name}] batchSize requires a positive integer and an unbundled one-shot build without custom plugins or overrides`)
+  }
 
   const resolvedOutdir = join(packageDir, outdir)
   const resolvedOutbase = join(packageDir, outbase)
@@ -129,10 +137,19 @@ export async function buildPackage(packageDir, userOptions = {}) {
     return { context }
   }
 
-  const result = await esbuild.build(buildOptions)
-  if (result.errors && result.errors.length > 0) {
-    console.error(`[build:${name}] build errors:`, result.errors)
-    process.exit(1)
+  const knownOutputPaths = batched ? new Set(resolvedEntryPoints.map((entry) => {
+    const path = relative(resolvedOutbase, entry)
+    return join(resolvedOutdir, path.slice(0, -extname(path).length) + '.js')
+  })) : undefined
+  // Keep only diagnostics when batching. Retaining all outputFiles here would
+  // defeat the memory bound, since the writer has already flushed each batch.
+  const result = batched ? { errors: [], warnings: [] } : await esbuild.build(buildOptions)
+  if (batched) {
+    const plugins = [createAtomicWritePlugin({ ...rewriteOptions, knownOutputPaths })]
+    for (let start = 0; start < resolvedEntryPoints.length; start += batchSize) {
+      const partial = await esbuild.build({ ...buildOptions, plugins, entryPoints: resolvedEntryPoints.slice(start, start + batchSize) })
+      result.warnings.push(...partial.warnings)
+    }
   }
 
   if (copyJson) {

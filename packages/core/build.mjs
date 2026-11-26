@@ -39,6 +39,7 @@ async function copyDesignSystemAssets() {
 
 await buildPackage(packageDir, {
   name: 'core',
+  batchSize: 512,
   clearDist: true,
   copyJson: true,
   copyJsonIgnore: ['**/i18n/**'],
@@ -55,6 +56,7 @@ const generatedEntryPoints = await glob('generated/**/*.{ts,tsx}', {
 if (generatedEntryPoints.length > 0) {
   await buildPackage(packageDir, {
     name: 'core:generated',
+    batchSize: 512,
     entryPoints: generatedEntryPoints,
     outbase: 'generated',
     outdir: 'dist/generated',

@@ -132,7 +132,7 @@ export function rewriteRelativeImports(content, fileDir, options = {}) {
 // watcher, cache restore), and atomic rename guarantees readers see only
 // complete contents.
 export function createAtomicWritePlugin(rewriteOptions = {}) {
-  const { onWrite, ...contentRewriteOptions } = rewriteOptions
+  const { onWrite, knownOutputPaths, ...contentRewriteOptions } = rewriteOptions
   return {
     name: 'atomic-write-with-js-extensions',
     setup(build) {
@@ -146,8 +146,7 @@ export function createAtomicWritePlugin(rewriteOptions = {}) {
         // Precompute the full set of paths this build will emit so the rewriter
         // can resolve `./foo` → `./foo/index.js` for directory-with-barrel imports
         // without querying the filesystem (nothing is on disk yet with write: false).
-        const knownOutputPaths = new Set(outputs.map((file) => file.path))
-        const effectiveOptions = { ...contentRewriteOptions, knownOutputPaths }
+        const effectiveOptions = { ...contentRewriteOptions, knownOutputPaths: knownOutputPaths ?? new Set(outputs.map((file) => file.path)) }
 
         for (const file of outputs) {
           let data = file.contents

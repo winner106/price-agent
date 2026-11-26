@@ -7,6 +7,28 @@ import ts from 'typescript-js'
 import { build } from 'esbuild'
 
 import { atomicWriteFileSync, createAtomicWritePlugin, rewriteRelativeImports } from '../lib/add-js-extension.mjs'
+import { buildPackage } from '../build-package.mjs'
+
+test('unbundled batches produce the same JS and maps, including forward barrel imports', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'build-batch-'))
+  try {
+    const src = path.join(root, 'src')
+    fs.mkdirSync(path.join(src, 'barrel'), { recursive: true })
+    const entry = path.join(src, 'entry.ts')
+    const barrel = path.join(src, 'barrel', 'index.ts')
+    fs.writeFileSync(entry, "export { value } from './barrel'\n")
+    fs.writeFileSync(barrel, 'export const value = 42\n')
+    const entryPoints = [entry, barrel]
+    await buildPackage(root, { entryPoints, outdir: 'single' })
+    await buildPackage(root, { entryPoints, outdir: 'batches', batchSize: 1 })
+    for (const output of ['entry.js', 'entry.js.map', 'barrel/index.js', 'barrel/index.js.map']) {
+      assert.deepEqual(fs.readFileSync(path.join(root, 'single', output)), fs.readFileSync(path.join(root, 'batches', output)))
+    }
+    assert.match(fs.readFileSync(path.join(root, 'batches', 'entry.js'), 'utf8'), /barrel\/index\.js/)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
 
 test('atomicWriteFileSync preserves mtime for byte-identical output', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'atomic-write-stable-'))
